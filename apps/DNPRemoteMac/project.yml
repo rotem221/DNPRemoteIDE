@@ -1,0 +1,123 @@
+name: DNPRemoteMac
+options:
+  bundleIdPrefix: com.dnp.remote
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    # `DEVELOPMENT_TEAM` lives in `Local.xcconfig` (gitignored) so
+    # contributor team identifiers never land in source control.
+    # Copy `Local.sample.xcconfig` → `Local.xcconfig` on first
+    # checkout and fill in your Apple Developer team ID. CI overrides
+    # this via the `--development-team` flag in build-release.sh, so
+    # the GitHub Actions workflow does not depend on the file.
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    ENABLE_HARDENED_RUNTIME: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    # Sparkle update placeholders. CI overrides both via xcodebuild
+    # build-settings flags (see scripts/build-release.sh). For local
+    # dev they stay empty — Sparkle simply refuses to auto-update,
+    # which is exactly what we want when you're running Debug builds.
+    SPARKLE_FEED_URL: ""
+    SPARKLE_PUBLIC_KEY: ""
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm.git
+    from: 1.2.0
+  CodeEditSourceEditor:
+    url: https://github.com/CodeEditApp/CodeEditSourceEditor.git
+    from: 0.10.0
+  # Sparkle 2.x — auto-update framework. Drives the in-app
+  # "Check for Updates" button and background polling. Public Ed25519
+  # key + feed URL are baked into Info.plist via the `SUPublicEDKey`
+  # / `SUFeedURL` build settings below; the matching private key
+  # lives only in GitHub Actions secrets (see docs/UPDATES.md).
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle.git
+    from: 2.6.0
+targets:
+  DNPRemoteMac:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: DNPRemoteMac
+        excludes: ["**/*.md"]
+      - path: ../../Packages/DNPShared/Sources/DNPShared
+        name: Shared
+        excludes: ["**/*.md"]
+    info:
+      path: DNPRemoteMac/Resources/Info.plist
+      properties:
+        CFBundleName: "DNP Remote Mac"
+        CFBundleDisplayName: "DNP Remote Mac"
+        # Keep the bundled Info.plist version single-sourced from the
+        # build settings above — without this, xcodegen would default
+        # CFBundleShortVersionString to "1.0", which then drifts from
+        # `MARKETING_VERSION` and confuses the About page that reads
+        # the plist directly via `Bundle.main.infoDictionary`.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSMinimumSystemVersion: "14.0"
+        NSHumanReadableCopyright: "© DNP Remote Suite"
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: "DNP Remote Mac uses your local network to talk to the iOS companion app."
+        NSBonjourServices:
+          - _dnp-remote._tcp
+        # TCC prompts the user sees on first use. Without the matching
+        # `*UsageDescription` keys, the system prompts appear with no
+        # explanation under the headline — Apple recommends populating
+        # these for any app that uses the gated API surface, even when
+        # technically not required.
+        NSScreenCaptureUsageDescription: "DNP Remote Mac captures your screen so you can mirror your Mac's display to the paired iPhone — used only when you start a Screen Mirror session from the iOS app."
+        NSAppleEventsUsageDescription: "DNP Remote Mac uses Apple Events to launch the GitHub authentication helper (`gh auth login`) on your behalf so the IDE can sign you in to GitHub from inside the app."
+        # Sparkle in-app updates. The `$(SPARKLE_FEED_URL)` /
+        # `$(SPARKLE_PUBLIC_KEY)` placeholders resolve at build time —
+        # for local dev they default to empty strings (see build
+        # settings above) and Sparkle simply refuses to auto-update;
+        # for release builds the GitHub Actions workflow injects both
+        # so the shipped app verifies signatures + polls the right
+        # appcast. Stable channel is the baked-in default; the
+        # `UpdateService` runtime delegate switches to beta when the
+        # user toggles the channel in Settings.
+        SUFeedURL: "$(SPARKLE_FEED_URL)"
+        SUPublicEDKey: "$(SPARKLE_PUBLIC_KEY)"
+        SUEnableAutomaticChecks: true
+        # 24h between background probes. Sparkle's default is 1h —
+        # too aggressive for an IDE that may be left open for days,
+        # since the user only cares about a fresh release within
+        # roughly a workday of it landing.
+        SUScheduledCheckInterval: 86400
+        SUEnableInstallerLauncherService: true
+    entitlements:
+      path: DNPRemoteMac/Resources/DNPRemoteMac.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.network.server: true
+        com.apple.security.network.client: true
+        com.apple.security.files.user-selected.read-write: true
+    configFiles:
+      Debug: Config.xcconfig
+      Release: Config.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dnp.remote.mac
+        CODE_SIGN_STYLE: Automatic
+        PROVISIONING_PROFILE_SPECIFIER: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      - package: SwiftTerm
+        product: SwiftTerm
+      - package: CodeEditSourceEditor
+        product: CodeEditSourceEditor
+      - package: CodeEditSourceEditor
+        product: CodeEditLanguages
+      - package: Sparkle
+        product: Sparkle

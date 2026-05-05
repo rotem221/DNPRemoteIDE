@@ -1,0 +1,280 @@
+name: Release
+
+# Manual workflow that builds, signs, notarizes and publishes a stable
+# release of DNP Remote Mac. Run from the GitHub UI:
+#   Actions → Release → Run workflow → enter version "X.Y.Z"
+#
+# Required repository secrets (configure in Settings → Secrets):
+#   DEVELOPER_ID_APPLICATION_CERTIFICATE  base64-encoded .p12 of the
+#                                         "Developer ID Application"
+#                                         certificate exported from
+#                                         Keychain Access.
+#   DEVELOPER_ID_APPLICATION_PASSWORD     password used when exporting
+#                                         the .p12 above.
+#   KEYCHAIN_PASSWORD                     any non-empty string — used
+#                                         to lock the temporary
+#                                         keychain CI creates per run.
+#   APPLE_ID                              Apple ID email used for
+#                                         notarization.
+#   APPLE_APP_SPECIFIC_PASSWORD           app-specific password issued
+#                                         at appleid.apple.com.
+#   APPLE_TEAM_ID                         10-char team id.
+#   SPARKLE_PRIVATE_KEY                   base64 Ed25519 private key
+#                                         from
+#                                         scripts/generate-sparkle-key.swift.
+#
+# The matching public Sparkle key is derived at runtime by
+# scripts/derive-sparkle-public-key.swift, so this workflow only needs
+# the private half.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Stable version to release (X.Y.Z)"
+        required: true
+        type: string
+
+jobs:
+  validate:
+    runs-on: macos-26
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      build_number: ${{ steps.validate.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate inputs
+        id: validate
+        run: |
+          VERSION="${{ inputs.version }}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: version must be in X.Y.Z format" >&2
+            exit 1
+          fi
+          # Build number = total commit count on the branch we're on.
+          # Monotonic and unique without requiring a separate manifest.
+          BUILD_NUMBER=$(git rev-list --count HEAD)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: validate
+    runs-on: macos-26
+    strategy:
+      matrix:
+        arch: [arm64, x86_64]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: apps/DNPRemoteMac
+        run: xcodegen generate
+
+      - name: Resolve Sparkle dependency
+        working-directory: apps/DNPRemoteMac
+        run: |
+          # `xcodebuild -resolvePackageDependencies` populates
+          # ~/Library/Developer/Xcode/DerivedData with the Sparkle
+          # SPM artifacts so sign_update is available for the appcast
+          # script. We also resolve at the SwiftPM level to populate
+          # .build/artifacts at the repo root, which is where the
+          # appcast script looks.
+          xcodebuild -resolvePackageDependencies \
+            -project DNPRemoteMac.xcodeproj \
+            -scheme DNPRemoteMac
+
+      - name: Resolve Sparkle for sign_update
+        run: |
+          # The appcast script expects sign_update at
+          # .build/artifacts/sparkle/Sparkle/bin/sign_update at the
+          # repo root, so we run a SwiftPM resolve from there.
+          # Sparkle has no direct Package.swift consumer in this
+          # repo, so we synthesize a tiny manifest, resolve, then
+          # delete it. This keeps the script's path expectation
+          # honest without permanently coupling the repo to a
+          # Package.swift just for tooling.
+          mkdir -p .sparkle-resolve
+          cat > .sparkle-resolve/Package.swift <<'EOF'
+          // swift-tools-version:5.9
+          import PackageDescription
+          let package = Package(
+              name: "SparkleResolve",
+              dependencies: [
+                  .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0")
+              ]
+          )
+          EOF
+          (cd .sparkle-resolve && swift package resolve)
+          # Move the artifacts to where generate-appcast.sh expects them.
+          mkdir -p .build/artifacts
+          rsync -a .sparkle-resolve/.build/artifacts/sparkle/ .build/artifacts/sparkle/
+
+      - name: Install create-dmg
+        run: npm install --global create-dmg
+
+      - name: Import signing certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_APPLICATION_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          echo "$CERTIFICATE_P12" | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security import certificate.p12 \
+            -k build.keychain \
+            -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          rm certificate.p12
+
+      - name: Resolve signing identity
+        id: identity
+        run: |
+          IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+          if [[ -z "$IDENTITY" ]]; then
+            echo "Error: No Developer ID Application certificate found" >&2
+            exit 1
+          fi
+          echo "name=$IDENTITY" >> "$GITHUB_OUTPUT"
+
+      - name: Derive Sparkle public key
+        id: sparkle
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          SPARKLE_PUBLIC_KEY=$(swift scripts/derive-sparkle-public-key.swift "$SPARKLE_PRIVATE_KEY")
+          echo "public_key=$SPARKLE_PUBLIC_KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Build and package DMG
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          chmod +x scripts/build-release.sh
+          scripts/build-release.sh \
+            --arch "${{ matrix.arch }}" \
+            --version "${{ needs.validate.outputs.version }}" \
+            --sign-identity "${{ steps.identity.outputs.name }}" \
+            --development-team "$APPLE_TEAM_ID" \
+            --sparkle-public-key "${{ steps.sparkle.outputs.public_key }}" \
+            --sparkle-feed-url "https://github.com/${{ github.repository }}/releases/latest/download/appcast-${{ matrix.arch }}.xml"
+
+      - name: Notarize DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          DMG="build/DNPRemoteMac-${{ needs.validate.outputs.version }}-${{ matrix.arch }}.dmg"
+          xcrun notarytool store-credentials "notary-profile" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID"
+          set +e
+          submit_output=$(xcrun notarytool submit "$DMG" \
+            --keychain-profile "notary-profile" \
+            --wait \
+            --output-format json)
+          submit_status=$?
+          echo "$submit_output"
+          submission_id=$(echo "$submit_output" | python3 -c 'import sys, json; print(json.load(sys.stdin)["id"])')
+          xcrun notarytool log "$submission_id" --keychain-profile "notary-profile" || true
+          set -e
+          if [ "$submit_status" -ne 0 ]; then exit "$submit_status"; fi
+          xcrun stapler staple "$DMG"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.arch }}
+          path: build/DNPRemoteMac-${{ needs.validate.outputs.version }}-${{ matrix.arch }}.dmg
+
+  release:
+    needs: [validate, build]
+    runs-on: macos-26
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve Sparkle for sign_update
+        run: |
+          mkdir -p .sparkle-resolve
+          cat > .sparkle-resolve/Package.swift <<'EOF'
+          // swift-tools-version:5.9
+          import PackageDescription
+          let package = Package(
+              name: "SparkleResolve",
+              dependencies: [
+                  .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0")
+              ]
+          )
+          EOF
+          (cd .sparkle-resolve && swift package resolve)
+          mkdir -p .build/artifacts
+          rsync -a .sparkle-resolve/.build/artifacts/sparkle/ .build/artifacts/sparkle/
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Fetch previous stable appcasts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p prev
+          for ARCH in arm64 x86_64; do
+            URL="https://github.com/${{ github.repository }}/releases/latest/download/appcast-${ARCH}.xml"
+            if curl -fsSL "$URL" -o "prev/appcast-${ARCH}.xml"; then
+              echo "Fetched previous stable appcast for $ARCH"
+            else
+              echo "No previous stable appcast for $ARCH (first release)"
+              rm -f "prev/appcast-${ARCH}.xml"
+            fi
+          done
+
+      - name: Generate Sparkle appcasts
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          CHANNEL: stable
+        run: |
+          chmod +x scripts/generate-appcast.sh
+          for ARCH in arm64 x86_64; do
+            EXISTING=""
+            if [[ -f "prev/appcast-${ARCH}.xml" ]]; then
+              EXISTING="prev/appcast-${ARCH}.xml"
+            fi
+            EXISTING_APPCAST="$EXISTING" scripts/generate-appcast.sh \
+              "artifacts/dmg-${ARCH}/DNPRemoteMac-${{ needs.validate.outputs.version }}-${ARCH}.dmg" \
+              "v${{ needs.validate.outputs.version }}" \
+              "${{ needs.validate.outputs.build_number }}" \
+              "appcast-${ARCH}.xml"
+          done
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ needs.validate.outputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --title "DNP Remote Mac v${{ needs.validate.outputs.version }}" \
+            --generate-notes \
+            artifacts/dmg-arm64/*.dmg \
+            artifacts/dmg-x86_64/*.dmg \
+            appcast-arm64.xml \
+            appcast-x86_64.xml

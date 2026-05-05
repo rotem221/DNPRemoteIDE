@@ -1,0 +1,25 @@
+{
+  "_comment": "Copy this file to .claude/settings.local.json. Local-only; never committed.",
+  "permissions": {
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(rm -rf ~)",
+      "Bash(rm -rf $HOME)",
+      "Bash(:(){ :|:& };:)",
+      "Bash(diskutil erasevolume*)"
+    ],
+    "ask": [
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset --hard*)",
+      "Bash(npm publish*)",
+      "Bash(yarn publish*)",
+      "Bash(brew uninstall*)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Edit(/Users/*/.env*)",
+      "Edit(/Users/*/.aws/*)",
+      "Edit(/Users/*/.ssh/*)"
+    ]
+  }
+}

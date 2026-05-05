@@ -1,0 +1,10 @@
+// Copy this file to `Local.xcconfig` (same directory) and replace
+// the placeholder with your own Apple Developer team identifier.
+// `Local.xcconfig` is gitignored so your team id never lands in
+// source control. CI uses the `APPLE_TEAM_ID` repo secret instead
+// and overrides at the xcodebuild level.
+//
+// Find your team id at https://developer.apple.com/account →
+// Membership → Team ID.
+
+DEVELOPMENT_TEAM = YOUR_APPLE_TEAM_ID

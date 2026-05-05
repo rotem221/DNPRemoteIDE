@@ -1,0 +1,13 @@
+// Project-wide Xcode build settings for DNP Remote Mac. Anything
+// that should be the same for every contributor goes here. Anything
+// personal — most importantly your Apple Developer `DEVELOPMENT_TEAM`
+// — goes in the gitignored `Local.xcconfig` next to this file
+// (template at `Local.sample.xcconfig`).
+//
+// The `?` in `#include?` makes the include optional, so `xcodegen`
+// + `xcodebuild` keep working on a fresh checkout that hasn't
+// created a `Local.xcconfig` yet. Without a team in place, you
+// won't be able to *sign* the app, but the project will still
+// generate and compile.
+
+#include? "Local.xcconfig"
