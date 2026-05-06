@@ -98,6 +98,8 @@ final class BridgeDispatcher {
             await handleScreenMirrorStop(data: data, connectionId: connectionId)
         case .remoteInput:
             await handleRemoteInput(data: data, connectionId: connectionId)
+        case .macUnlockRequest:
+            await handleMacUnlockRequest(data: data, connectionId: connectionId)
 
         case .heartbeat:
             // Ack-only: send our own heartbeat back.
@@ -748,6 +750,48 @@ final class BridgeDispatcher {
         }
     }
 
+    /// Handle an incoming `macUnlockRequest` from a paired iPhone.
+    ///
+    /// Same envelope-verification gate as `remoteInput` — we will not
+    /// type *anything* into the lock screen until we have decoded the
+    /// payload, looked up the sender's stored public key, and verified
+    /// the Ed25519 signature plus our standard nonce / timestamp
+    /// replay-protection. After unlock, we send back a
+    /// `MacUnlockResponse` so the iOS toolbar can switch its banner
+    /// from the optimistic "Unlock sent…" to the real outcome.
+    private func handleMacUnlockRequest(data: Data, connectionId: UUID) async {
+        guard let deviceId = deviceForConnection[connectionId],
+              let key = await vm?.pairing.publicKey(forDevice: deviceId),
+              let env = try? DNPCoders.decode(BridgeEnvelope<MacUnlockRequestPayload>.self, from: data),
+              (try? BridgeSigner.verify(envelope: env, publicKey: key)) == true
+        else {
+            log("macUnlockRequest rejected (signature / decode)")
+            await sendMacUnlockResponse(.init(ok: false, reason: "Signature rejected"),
+                                        to: connectionId)
+            return
+        }
+
+        // We deliberately do not log the password (not even at debug)
+        // and do not retain it past this scope — the local capture
+        // ensures the only place it exists is on the MainActor stack
+        // for the duration of the keystroke synthesis.
+        let password = env.payload.password
+        let outcome = await MacUnlockService.shared.unlock(password: password)
+        await sendMacUnlockResponse(.init(ok: outcome.ok, reason: outcome.reason),
+                                    to: connectionId)
+    }
+
+    private func sendMacUnlockResponse(_ payload: MacUnlockResponsePayload,
+                                       to connectionId: UUID) async {
+        guard let macId = await vm?.pairing.macDeviceId,
+              let pk = await vm?.pairing.macIdentity else { return }
+        var env = BridgeEnvelope<MacUnlockResponsePayload>(
+            type: .macUnlockResponse, senderId: macId,
+            nonce: NonceFactory.make(), payload: payload)
+        try? BridgeSigner.sign(envelope: &env, privateKey: pk)
+        vm?.bridge.send(env, to: connectionId)
+    }
+
     private func sendDirectoryListing(_ payload: DirectoryListingResponsePayload, to connectionId: UUID) async {
         guard let macId = await vm?.pairing.macDeviceId,
               let pk = await vm?.pairing.macIdentity else { return }
@@ -814,6 +858,15 @@ final class BridgeDispatcher {
                                      currentBranch: info.currentBranch)
         }()
         let auth = GitHubService.currentStatus()
+        // Refresh the lock-state snapshot right before the broadcast.
+        // The notification-driven service is usually authoritative, but
+        // a missed `screenIsLocked` distributed notification (e.g.,
+        // app suspended while the lid closed) could leave the cached
+        // value stale. A direct `CGSessionCopyCurrentDictionary` read
+        // here is microseconds and guarantees iOS sees the same
+        // truth the Mac sees.
+        await MainActor.run { MacLockMonitorService.shared.readCurrent() }
+        let isLocked = await MainActor.run { MacLockMonitorService.shared.isLocked }
         let payload = ProjectInfoPayload(
             rootPath: vm.projectRoot?.url.path,
             displayName: vm.projectRoot?.url.lastPathComponent,
@@ -827,7 +880,8 @@ final class BridgeDispatcher {
                 user: auth.user,
                 host: auth.host,
                 scopes: auth.scopes
-            )
+            ),
+            isLocked: isLocked
         )
         let macId = await vm.pairing.macDeviceId
         guard let pk = await vm.pairing.macIdentity else { return }

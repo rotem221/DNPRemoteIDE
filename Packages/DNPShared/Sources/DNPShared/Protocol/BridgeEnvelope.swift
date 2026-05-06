@@ -77,6 +77,8 @@ public enum BridgeMessageType: String, Codable, Hashable, Sendable {
     case screenMirrorFrame            // Mac → iOS: one captured frame (JPEG, base64)
     case screenMirrorCursor           // Mac → iOS: cursor position update (decoupled from frames so the cursor can stream at ~30Hz while frames stay at 5–10fps)
     case remoteInput                  // iOS → Mac: synthesised mouse/keyboard event
+    case macUnlockRequest             // iOS → Mac: type the bundled password into the lock screen and submit
+    case macUnlockResponse            // Mac → iOS: ack/error for the above
     case forceApprove                 // iOS → Mac: user-driven "type 1\r into the named session's PTY now" — escape hatch when our PTY-driven approval detection misses a prompt
     case aiUsageBroadcast             // Mac → iOS: latest Claude Code usage snapshot (5h / 7d / etc. quotas) for the Context popover
     case activeSessionBroadcast       // Mac → iOS: id of the IDE's currently-focused session (drives auto-follow on the iOS session capsule)

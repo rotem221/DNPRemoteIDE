@@ -8,6 +8,10 @@ struct MacSettingsView: View {
     /// the singleton lives forever, we just want this view to redraw
     /// when `availableUpdateVersion` / `canCheckForUpdates` change.
     @ObservedObject private var updates = UpdateService.shared
+    /// Live state for the Permissions tab. Singleton lives forever;
+    /// `@ObservedObject` is enough to redraw rows when a `refresh()`
+    /// call updates a stored `Status`.
+    @ObservedObject private var permissions = PermissionsService.shared
     @AppStorage("dnp.defaultLaunchVerbose") private var verbose = false
     @AppStorage("dnp.permissionMode") private var permissionMode = "ask"
     @AppStorage("dnp.mac.skipCloseConfirm") private var skipCloseConfirm = false
@@ -49,7 +53,7 @@ struct MacSettingsView: View {
     /// of cards. Persisted via `@AppStorage` so the user lands on the
     /// last-used category when they reopen the page.
     enum Category: String, CaseIterable, Identifiable {
-        case general, keyboard, connectivity, notifications, advanced, updates, about
+        case general, keyboard, connectivity, notifications, permissions, advanced, updates, about
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -57,6 +61,7 @@ struct MacSettingsView: View {
             case .keyboard:      return "Keyboard"
             case .connectivity:  return "Connectivity"
             case .notifications: return "Notifications"
+            case .permissions:   return "Permissions"
             case .advanced:      return "Advanced"
             case .updates:       return "Updates"
             case .about:         return "About"
@@ -68,6 +73,7 @@ struct MacSettingsView: View {
             case .keyboard:      return "keyboard"
             case .connectivity:  return "network"
             case .notifications: return "bell.badge"
+            case .permissions:   return "lock.shield"
             case .advanced:      return "slider.horizontal.3"
             case .updates:       return "arrow.down.circle"
             case .about:         return "info.circle"
@@ -145,6 +151,8 @@ struct MacSettingsView: View {
             screenMirrorCard
         case .notifications:
             notificationsCard
+        case .permissions:
+            permissionsCard
         case .advanced:
             contextCard
             feedCard
@@ -398,6 +406,203 @@ struct MacSettingsView: View {
         }
     }
 
+    /// Permissions card — single source of truth for the macOS
+    /// privacy & security toggles DNP Remote depends on. Each row
+    /// shows the live status from `PermissionsService`, the
+    /// rationale, and either a "Request" button (where macOS exposes
+    /// an inline prompt) or an "Open Settings" deep-link into the
+    /// matching pane in System Settings.
+    @ViewBuilder
+    private var permissionsCard: some View {
+        SettingsCard(title: "Permissions", icon: "lock.shield") {
+            // Help banner — gives the user everything they need to add
+            // the right binary by hand if macOS's inline TCC prompt
+            // didn't auto-register it (a Debug build run from
+            // DerivedData rarely does, the dialog usually only shows
+            // for builds in /Applications).
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundStyle(MacTheme.accent)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("In System Settings, look for **\(Self.runningAppName)** (`\(Self.runningBundleId)`).")
+                            .font(.caption).foregroundStyle(MacTheme.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("If the entry isn't there, click **+** in the System Settings list and pick the app from the path below. If you see an older entry like “DNP Mac Bridge”, select it and press **−** to remove it first.")
+                            .font(.caption2).foregroundStyle(MacTheme.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+                // App path block — shown verbatim and copy/reveal
+                // affordances so the user can drag the .app onto the
+                // System Settings list, or paste the path into the
+                // file picker that the **+** button presents.
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("App location")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(MacTheme.textTertiary)
+                    HStack(spacing: 8) {
+                        Text(Self.runningAppPath)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(MacTheme.textPrimary)
+                            .lineLimit(2).truncationMode(.middle)
+                            .textSelection(.enabled)
+                        Spacer(minLength: 4)
+                        Button {
+                            #if canImport(AppKit)
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(Self.runningAppPath, forType: .string)
+                            #endif
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                                .labelStyle(.iconOnly)
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .help("Copy path")
+                        Button {
+                            #if canImport(AppKit)
+                            NSWorkspace.shared.activateFileViewerSelecting([
+                                URL(fileURLWithPath: Self.runningAppPath)
+                            ])
+                            #endif
+                        } label: {
+                            Label("Reveal", systemImage: "magnifyingglass")
+                                .labelStyle(.iconOnly)
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .help("Reveal in Finder — drag the app into the System Settings list")
+                    }
+                    .padding(8)
+                    .background(MacTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+                }
+                HStack {
+                    Spacer()
+                    Button("Refresh") { permissions.refresh() }
+                        .buttonStyle(.bordered).controlSize(.small)
+                }
+            }
+            Divider().background(MacTheme.border).padding(.vertical, 4)
+            ForEach(PermissionsService.Kind.allCases) { kind in
+                permissionRow(for: kind)
+                if kind != PermissionsService.Kind.allCases.last {
+                    Divider().background(MacTheme.border).padding(.vertical, 4)
+                }
+            }
+        }
+        .onAppear { permissions.refresh() }
+    }
+
+    /// What the running app is *actually* named, read from
+    /// `CFBundleDisplayName` (or `CFBundleName` if absent). Surfaced in
+    /// the Permissions card so the user can search for the same string
+    /// inside System Settings — a build that ships under a different
+    /// name (older "DNP Mac Bridge" prototypes, future re-brands) stays
+    /// self-documenting without us having to manually keep the help
+    /// text in sync with the bundle plist.
+    private static var runningAppName: String {
+        let info = Bundle.main.infoDictionary
+        if let name = info?["CFBundleDisplayName"] as? String, !name.isEmpty { return name }
+        if let name = info?["CFBundleName"] as? String, !name.isEmpty { return name }
+        return "DNP Remote Mac"
+    }
+
+    private static var runningBundleId: String {
+        Bundle.main.bundleIdentifier ?? "com.dnp.remote.mac"
+    }
+
+    /// Absolute path to the running `.app` bundle. Surfaced in the
+    /// permissions banner so the user can paste it into the file
+    /// picker behind the System Settings **+** button when macOS's
+    /// inline TCC prompt fails to auto-register the binary (Debug
+    /// builds run straight from `~/Library/Developer/Xcode/DerivedData`
+    /// rarely register, App Store builds in `/Applications` always do).
+    private static var runningAppPath: String {
+        Bundle.main.bundlePath
+    }
+
+    private func permissionRow(for kind: PermissionsService.Kind) -> some View {
+        let status = permissions.status(for: kind)
+        return HStack(alignment: .top, spacing: 12) {
+            Image(systemName: kind.symbol)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(status.isOK ? MacTheme.success : MacTheme.warning)
+                .frame(width: 36, height: 36)
+                .background(
+                    (status.isOK ? MacTheme.success : MacTheme.warning).opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 9))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(kind.title)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(MacTheme.textPrimary)
+                    permissionStatusPill(status)
+                }
+                Text(kind.rationale)
+                    .font(.caption).foregroundStyle(MacTheme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            VStack(spacing: 6) {
+                // One-click primary action: pop the system permission
+                // dialog (which on Apple's side also adds the entry to
+                // the TCC list, so the user can find it in System
+                // Settings) AND open the matching System Settings pane
+                // in the same gesture. The previous form split these
+                // into two buttons, which led the user to clicking
+                // "Open Settings" first and then not seeing the entry
+                // in the list because it had not been registered yet.
+                if status != .granted {
+                    Button {
+                        Task {
+                            if canRequestInline(kind) {
+                                await permissions.requestInline(for: kind)
+                            }
+                            permissions.openSystemSettings(for: kind)
+                        }
+                    } label: {
+                        Label("Grant Access", systemImage: "arrow.up.right.square.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                Button(status == .granted ? "Manage" : "Open Settings") {
+                    permissions.openSystemSettings(for: kind)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    private func permissionStatusPill(_ status: PermissionsService.Status) -> some View {
+        let bg: Color
+        let fg: Color
+        switch status {
+        case .granted:        bg = MacTheme.success.opacity(0.18); fg = MacTheme.success
+        case .denied:         bg = MacTheme.warning.opacity(0.18); fg = MacTheme.warning
+        case .notDetermined:  bg = MacTheme.textTertiary.opacity(0.18); fg = MacTheme.textTertiary
+        case .unknown:        bg = MacTheme.textTertiary.opacity(0.12); fg = MacTheme.textTertiary
+        }
+        return Text(status.label)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8).padding(.vertical, 2)
+            .background(bg, in: Capsule())
+            .foregroundStyle(fg)
+    }
+
+    /// Some permissions (Notifications, Accessibility, Screen Recording)
+    /// expose an inline prompt API. Local Network and Automation only
+    /// surface their dialogs the first time the relevant API is touched
+    /// at runtime — for those we hide "Request" and route the user
+    /// straight to System Settings.
+    private func canRequestInline(_ kind: PermissionsService.Kind) -> Bool {
+        switch kind {
+        case .accessibility, .screenRecording, .notifications: return true
+        case .localNetwork, .automation: return false
+        }
+    }
+
     /// Updates card — surfaces Sparkle's state (current version, last
     /// check, available update) plus the user-facing controls
     /// (Check Now, automatic toggle, channel picker). Mirrors the
@@ -544,8 +749,8 @@ struct MacSettingsView: View {
 
             row("App", value: "DNP Remote Mac · \(Self.appVersion)")
             labeledRow("Product site") {
-                Link("remotednp.com",
-                     destination: URL(string: "https://remotednp.com")!)
+                Link("dnpremote.com",
+                     destination: URL(string: "https://www.dnpremote.com")!)
                     .font(.callout)
             }
             labeledRow("Company") {

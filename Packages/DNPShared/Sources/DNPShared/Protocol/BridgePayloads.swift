@@ -146,10 +146,18 @@ public struct ProjectInfoPayload: Codable, Hashable, Sendable {
     /// Current `gh auth status` snapshot — drives the GitHub indicator in iOS Settings and
     /// the file-explorer's "Browse Repos" entry. Nil when `gh` is not installed.
     public let gitHubAuth: GitHubAuthInfoPayload?
+    /// macOS lock state at the moment this payload was assembled.
+    /// `nil` for older Mac builds that pre-date the lock-state probe —
+    /// iOS treats `nil` the same as "we don't know" and falls back to
+    /// the historical "always show the unlock affordance" behaviour.
+    /// `true` = lock screen is up (unlock button is meaningful);
+    /// `false` = the user is already signed in (button can hide).
+    public let isLocked: Bool?
     public init(rootPath: String?, displayName: String?, homePath: String? = nil,
                 tailscaleHostname: String? = nil, tailscaleIPv4: String? = nil,
                 gitHub: SessionGitHubInfo? = nil,
-                gitHubAuth: GitHubAuthInfoPayload? = nil) {
+                gitHubAuth: GitHubAuthInfoPayload? = nil,
+                isLocked: Bool? = nil) {
         self.rootPath = rootPath
         self.displayName = displayName
         self.homePath = homePath
@@ -157,6 +165,7 @@ public struct ProjectInfoPayload: Codable, Hashable, Sendable {
         self.tailscaleIPv4 = tailscaleIPv4
         self.gitHub = gitHub
         self.gitHubAuth = gitHubAuth
+        self.isLocked = isLocked
     }
 }
 

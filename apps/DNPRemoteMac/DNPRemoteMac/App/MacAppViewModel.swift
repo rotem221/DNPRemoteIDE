@@ -485,6 +485,20 @@ final class MacAppViewModel: ObservableObject {
         await bridge.start()
         bridgeStatus = .connected
 
+        // Lock-state monitor — drives the iOS unlock-button visibility
+        // gate. We start it AFTER the bridge is up so the very first
+        // `broadcastProjectInfo` already carries an accurate
+        // `isLocked` flag. The callback re-broadcasts ProjectInfo on
+        // every transition so a paired iPhone sees the change in
+        // real time without having to poll.
+        MacLockMonitorService.shared.start()
+        MacLockMonitorService.shared.onLockStateChanged = { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                await self.dispatcher.broadcastProjectInfo()
+            }
+        }
+
         // Start the local HTTP listener that `dnp-hook-relay` posts to.
         hookIngest.onHook = { [weak self] body in
             guard let self else { return }

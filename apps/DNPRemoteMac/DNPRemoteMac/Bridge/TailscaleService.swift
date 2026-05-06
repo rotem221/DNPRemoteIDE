@@ -25,14 +25,51 @@ struct TailscaleService {
 
     /// Synchronously query the Tailscale daemon. Returns `Status(nil, nil)` if Tailscale isn't
     /// running or installed — failure is silent so the bridge keeps working on plain LAN.
+    ///
+    /// **Validation gate**. The Tailscale CLI on macOS occasionally prints diagnostic
+    /// strings on stdout instead of returning a non-zero exit code (most commonly the
+    /// `"The Tailscale GUI failed to start: …"` output emitted when `tailscaled` isn't
+    /// running but the CLI binary still exists). Without validation, that string used to
+    /// flow straight through as `ipv4`, get embedded into the `tailscaleFallbackEndpoint`
+    /// URL (`tcp://The Tailscale GUI failed to start: …:18733`), and surface on the
+    /// paired iPhone as a `Bad endpoint URL` connection error. We now refuse to pass
+    /// anything that doesn't structurally look like an IPv4 / hostname so a misbehaving
+    /// CLI can't poison the bridge handshake.
     static func currentStatus() -> Status {
         guard let tailscale = locateBinary() else { return Status(ipv4: nil, hostname: nil) }
-        let ipv4 = run(tailscale, args: ["ip", "-4"])?
+        let rawIPv4 = run(tailscale, args: ["ip", "-4"])?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .split(separator: "\n").first.map(String.init)
+        let ipv4 = rawIPv4.flatMap { isPlausibleIPv4($0) ? $0 : nil }
         let hostnameFull = run(tailscale, args: ["status", "--self", "--json"]) ?? ""
         let hostname = parseHostname(fromStatusJSON: hostnameFull)
+            .flatMap { isPlausibleHostname($0) ? $0 : nil }
         return Status(ipv4: ipv4, hostname: hostname)
+    }
+
+    /// Cheap sanity check — IPv4 must be 4 dotted decimal octets, each 0–255, no
+    /// surrounding whitespace, no embedded letters. Anything else (the GUI launch
+    /// error, an empty string, a stray prompt) gets dropped by the caller so the
+    /// fallback endpoint stays nil rather than a malformed URL.
+    private static func isPlausibleIPv4(_ s: String) -> Bool {
+        let parts = s.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        for part in parts {
+            guard !part.isEmpty, part.count <= 3,
+                  part.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  let n = Int(part), (0...255).contains(n) else { return false }
+        }
+        return true
+    }
+
+    /// Hostname check — Tailscale hostnames are DNS labels (letters, digits, hyphens,
+    /// dots). We reject any string with whitespace or characters that would break a
+    /// `tcp://<host>:<port>` URL on the iOS side.
+    private static func isPlausibleHostname(_ s: String) -> Bool {
+        guard !s.isEmpty, s.count < 253 else { return false }
+        let allowed = CharacterSet(charactersIn:
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-")
+        return s.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
     private static func locateBinary() -> String? {
