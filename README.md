@@ -16,30 +16,52 @@
 
 ---
 
-## Screens
+## Download
 
-<p align="center">
-  <img alt="Welcome screen — pick a folder, clone from Git, or open an SSH host. Recent projects below." src="assets/welcome.png" width="780" />
-</p>
+<table>
+<tr>
+<th width="50%" align="center">📱 &nbsp;DNP Remote IDE — iPhone</th>
+<th width="50%" align="center">💻 &nbsp;DNP Remote Mac — desktop IDE</th>
+</tr>
+<tr>
+<td align="center">
 
-> **Welcome.** First thing you see when you launch the app. Three entry
-> tiles cover the canonical project sources — a folder on this Mac, a
-> Git URL to clone, or an SSH host to mount. Recent projects sit below
-> with their full paths and last-opened timestamps. The status bar at
-> the bottom shows the bridge listener port, any paired iPhone, and the
-> detected Claude Code CLI version.
+_App Store link coming soon_<br/>
+<sub>The iPhone companion mirrors your Mac sessions, surfaces approvals as Liquid&#8209;Glass cards, and lets you talk to Claude from anywhere on your LAN or tailnet.</sub>
 
-<p align="center">
-  <img alt="Workspace — a terminal session running Claude Code, with the project sidebar on the left and the bridge status on the bottom." src="assets/workspace.png" width="780" />
-</p>
+</td>
+<td align="center">
 
-> **Workspace.** One window per project. The terminal pane in the
-> centre runs `claude` inside a real PTY (raw mode, signal forwarding,
-> proper resize), so vim, fzf, watch loops, and TUI dashboards all
-> render the way they do in any other terminal. The sidebar surfaces
-> sessions, files, GitHub integration, screen mirror, settings, and
-> diagnostics; the status bar reports bridge health and the
-> currently-paired iPhone.
+<a href="https://github.com/rotem221/DNPRemoteIDE/releases/latest"><strong>⬇️ &nbsp;Download latest DMG</strong></a><br/>
+<sub>Universal binary, signed with a Developer ID, notarized by Apple. Auto&#8209;updates via Sparkle on a 24h cadence and on demand from <em>Settings → Updates → Check Now</em>.</sub>
+
+</td>
+</tr>
+<tr>
+<td><img alt="iPhone — chat with Claude, Online status, Allow pill on composer" src="assets/ios-chat.png" /></td>
+<td><img alt="Mac IDE welcome — Open Project / Clone from Git / Connect to SSH + recent projects" src="assets/welcome.png" /></td>
+</tr>
+<tr>
+<td><img alt="iPhone — context monitor popover (11% used, 23,939 / 200,000 tokens, Healthy)" src="assets/ios-context.png" /></td>
+<td><img alt="Mac IDE workspace — Claude Code session running inside a real PTY pane" src="assets/workspace.png" /></td>
+</tr>
+</table>
+
+> **iPhone (top → bottom):** the chat surface paired to the Mac (top
+> bar shows the active session capsule, status pill says *Online*),
+> and the same chat with the context-monitor popover open — 11% used
+> against the 200K window, with a Healthy badge. *Approvals*, when
+> Claude needs permission, appear as a card above the composer; the
+> *Allow* pill on the input row is the always-visible force-approve
+> shortcut for users who'd rather decide quickly.
+>
+> **Mac (top → bottom):** the welcome scene first thing on launch —
+> three entry tiles for opening a local folder, cloning a Git URL, or
+> connecting to an SSH host, plus a Recent Projects strip. Then the
+> workspace itself — one window per project, terminal pane in the
+> centre running `claude` inside a real PTY, sidebar covering
+> sessions / files / GitHub / screen-mirror / settings / diagnostics,
+> bridge status pinned to the bottom-right.
 
 ---
 
