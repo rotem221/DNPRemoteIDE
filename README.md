@@ -16,6 +16,33 @@
 
 ---
 
+## Screens
+
+<p align="center">
+  <img alt="Welcome screen — pick a folder, clone from Git, or open an SSH host. Recent projects below." src="assets/welcome.png" width="780" />
+</p>
+
+> **Welcome.** First thing you see when you launch the app. Three entry
+> tiles cover the canonical project sources — a folder on this Mac, a
+> Git URL to clone, or an SSH host to mount. Recent projects sit below
+> with their full paths and last-opened timestamps. The status bar at
+> the bottom shows the bridge listener port, any paired iPhone, and the
+> detected Claude Code CLI version.
+
+<p align="center">
+  <img alt="Workspace — a terminal session running Claude Code, with the project sidebar on the left and the bridge status on the bottom." src="assets/workspace.png" width="780" />
+</p>
+
+> **Workspace.** One window per project. The terminal pane in the
+> centre runs `claude` inside a real PTY (raw mode, signal forwarding,
+> proper resize), so vim, fzf, watch loops, and TUI dashboards all
+> render the way they do in any other terminal. The sidebar surfaces
+> sessions, files, GitHub integration, screen mirror, settings, and
+> diagnostics; the status bar reports bridge health and the
+> currently-paired iPhone.
+
+---
+
 ## What is this
 
 **DNP Remote IDE** is a macOS-native developer environment built around
