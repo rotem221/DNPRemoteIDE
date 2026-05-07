@@ -27,7 +27,7 @@
 <td align="center">
 
 <a href="https://testflight.apple.com/join/7zr9FcAH"><strong>🧪 &nbsp;Join the TestFlight beta</strong></a><br/>
-<sub>The iPhone companion mirrors your Mac (or Linux daemon) sessions, surfaces approvals as Liquid&#8209;Glass cards, and lets you talk to Claude from anywhere on your LAN or tailnet. App&nbsp;Store release coming soon — for now grab the build through TestFlight.</sub>
+<sub>The iPhone companion mirrors your Mac (or <a href="https://www.npmjs.com/package/dnp-remote-linux">Linux daemon</a>) sessions, surfaces approvals as Liquid&#8209;Glass cards, and lets you talk to Claude from anywhere on your LAN or tailnet. App&nbsp;Store release coming soon — for now grab the build through TestFlight. <em>Windows host coming soon.</em></sub>
 
 </td>
 <td align="center">
@@ -111,6 +111,12 @@ forwarding. On top of that real terminal it adds:
   a project-level `MEMORY.md` notebook auto-maintained per repo.
 - **Background auto-updates** — Sparkle-signed Ed25519 release updates
   delivered via this repo’s GitHub Releases.
+- **Cross-platform hosts** — the same iPhone build that drives this Mac
+  IDE also pairs with the Linux daemon
+  ([`dnp-remote-linux`](https://www.npmjs.com/package/dnp-remote-linux),
+  one `npm i -g` away on any Linux box). A Windows host is in
+  development and will land as a sibling package — same signed bridge
+  protocol, same iPhone app, no per-host configuration.
 
 ## Download
 
