@@ -26,8 +26,8 @@
 <tr>
 <td align="center">
 
-_App Store link coming soon_<br/>
-<sub>The iPhone companion mirrors your Mac sessions, surfaces approvals as Liquid&#8209;Glass cards, and lets you talk to Claude from anywhere on your LAN or tailnet.</sub>
+<a href="https://testflight.apple.com/join/7zr9FcAH"><strong>🧪 &nbsp;Join the TestFlight beta</strong></a><br/>
+<sub>The iPhone companion mirrors your Mac (or Linux daemon) sessions, surfaces approvals as Liquid&#8209;Glass cards, and lets you talk to Claude from anywhere on your LAN or tailnet. App&nbsp;Store release coming soon — for now grab the build through TestFlight.</sub>
 
 </td>
 <td align="center">
@@ -104,8 +104,8 @@ forwarding. On top of that real terminal it adds:
 - **Pairable iPhone companion** — mobile remote built on a signed local
   WebSocket bridge. The iPhone never executes shell — it only displays
   semantic events and replies to approvals. *(The iPhone app is
-  distributed separately via the App Store; this repo contains only
-  the Mac IDE.)*
+  distributed separately via [TestFlight](https://testflight.apple.com/join/7zr9FcAH)
+  while it's in beta; this repo contains only the Mac IDE.)*
 - **Local-first storage** — every session’s transcript, JSONL events
   and metadata are persisted under your local `memory/` directory, with
   a project-level `MEMORY.md` notebook auto-maintained per repo.
